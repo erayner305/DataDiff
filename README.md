@@ -8,4 +8,4 @@ Massage the data files
     - 'Well', 'Date', 'Constituent' must be present
 - Ensure the constituent/well/gradient names are the same
 - Remove unnecessary flags
-
+- Check for hidden sheets
