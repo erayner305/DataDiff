@@ -1,83 +1,81 @@
-import pandas as pd
-import openpyxl
-from openpyxl import Workbook
-from openpyxl.styles import PatternFill
+import pandas
+import tkinter
+from tkinter import filedialog
+from csv_diff import load_csv, compare, human_text
 
-# Read Excel files into dataframes
-print("Ensure you follow the readme before continuing")
-file1 = input("Input the sanitas data file's name without extension: ")
-file2 = input("Input the comparison data file's name without extension: ")
+# Function to format date columns
+def format_date_column(df, date_column_name):
+    df[date_column_name] = pandas.to_datetime(df[date_column_name], errors='coerce').dt.strftime('%m/%d/%Y')
+    return df
 
-df1 = pd.read_excel(f"{file1}.xlsx")
-df2 = pd.read_excel(f"{file2}.xlsx")
+# Global variables to hold the file paths
+file1_path = ""
+file2_path = ""
+OUTPUT_PATH = "diff_output.txt"
 
-df1['Date'] = df1['Date'].dt.date
-df2['Date'] = df2['Date'].dt.date
+# Function to trigger the file selection dialog
+def file_select(file_num, label):
+    global file1_path, file2_path, confirmationLabel, errorLabel
+    errorLabel.pack_forget()
+    confirmationLabel.pack_forget()
+    file_path = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx")])
+    if file_path != "":
+        label.config(text=f"File {file_num} Selected: {file_path}")
+        if file_num == 1:
+            file1_path = file_path  # Store file1 path
+        elif file_num == 2:
+            file2_path = file_path  # Store file2 path
+    print(f"File {file_num} selected: {file_path}")  # Print the selected file path for debugging
 
-# Columns to identify unique rows
-key_columns = ['Well', 'Date', 'Constituent']
+# Function to perform the diff check
+def check_Diff(file1, file2):
+    global confirmationLabel, errorLabel
+    if file1 != "" or file2 != "":
+        # Load the CSV files into dataframes
+        dataframe1 = pandas.read_excel(file1)
+        dataframe2 = pandas.read_excel(file2)
 
-# Columns to check for differences
-diff_columns = ['MDL', 'PQL', 'Flags', 'Obs']
+        # Format date columns and create a "key" column
+        dataframe1 = format_date_column(dataframe1, 'Date')
+        dataframe1['key'] = dataframe1['Well'].astype(str) + '-' + dataframe1['Constituent'].astype(str) + '-' + dataframe1['Date'].astype(str)
+        dataframe1.to_csv("file1.csv", index=False)
 
-# Merge the dataframes based on the key columns
-merged_df = pd.merge(df1, df2, on=key_columns, how='outer', indicator=True, suffixes=(f'_{file1}', f'_{file2}'))
+        dataframe2 = format_date_column(dataframe2, 'Date')
+        dataframe2['key'] = dataframe2['Well'].astype(str) + '-' + dataframe2['Constituent'].astype(str) + '-' + dataframe2['Date'].astype(str)
+        dataframe2.to_csv("file2.csv", index=False)
 
-# Identify rows unique to each file
-only_in_df1 = merged_df[merged_df['_merge'] == 'left_only'][key_columns + [f"{col}_{file1}" for col in diff_columns]]
-only_in_df2 = merged_df[merged_df['_merge'] == 'right_only'][key_columns + [f"{col}_{file2}" for col in diff_columns]]
+        # Compare the two CSV files and generate the diff
+        diff = compare(load_csv(open("file1.csv"), "key"), load_csv(open("file2.csv"), "key"))
+        global OUTPUT_PATH
+        # Save the diff output to a file
+        with open(OUTPUT_PATH, 'w') as output_file:
+            output_file.write(human_text(diff, show_unchanged=True))
 
-# Identify rows that exist in both but have differing values in specified columns
-common_rows = merged_df[merged_df['_merge'] == 'both']
-def check_differences(row):
-    for col in diff_columns:
-        val1 = row[f"{col}_{file1}"]
-        val2 = row[f"{col}_{file2}"]
-
-        if col == 'Observed':
-            # Skip the check if either value starts with '<'
-            if isinstance(val1, str) and val1.startswith('<'):
-                continue
-            if isinstance(val2, str) and val2.startswith('<'):
-                continue
-
-        if val1 != val2:
-            return True
-
-    return False
-
-differing_rows = common_rows[common_rows.apply(check_differences, axis=1)]
-# Output results to Excel files
-only_in_df1.to_excel(f"only_in_{file1}.xlsx", index=False)
-only_in_df2.to_excel(f"only_in_{file2}.xlsx", index=False)
-
-# Define a function that identifies which cells differ in a given row
-def highlight_differences(row, worksheet, row_num):
-    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    
-    start_col = len(key_columns) + 1  # Assuming key columns are in the beginning
-
-    for col_idx, col in enumerate(diff_columns):
-        val1 = row[f"{col}_{file1}"]
-        val2 = row[f"{col}_{file2}"]
-
-        if val1 != val2:
-            # Highlight the cell. Note that Excel is 1-indexed
-            # Column index starts after key columns
-            worksheet.cell(row=row_num, column=start_col + col_idx).fill = yellow_fill
+        confirmationLabel.pack()
+    else:
+        errorLabel.pack()
 
 
-# Save differing_rows to Excel and open the workbook and worksheet
-differing_rows.to_excel("differing_rows.xlsx", index=False)
-workbook = Workbook()
-workbook = openpyxl.load_workbook("differing_rows.xlsx")
-worksheet = workbook.active
+# Create GUI
+root = tkinter.Tk(className="Diff Checker")
 
-# Apply highlighting
-for row_idx, row in differing_rows.iterrows():
-    highlight_differences(row, worksheet, row_idx + 2)  # row_idx + 2 because Excel is 1-indexed and we have a header
+# Button to select file 1
+importLabel1 = tkinter.Label(root, text=f"No File Selected")
+importLabel1.pack(pady=2)
+importButton1 = tkinter.Button(root, text="Import File 1", width=15, height=2, command=lambda: file_select(1, importLabel1))
+importButton1.pack(pady=2)
 
-# Save the changes
-workbook.save("differing_rows.xlsx")
+# Button to select file 2
+importLabel2 = tkinter.Label(root, text=f"No File Selected")
+importLabel2.pack(pady=2)
+importButton2 = tkinter.Button(root, text="Import File 2", width=15, height=2, command=lambda: file_select(2, importLabel2))
+importButton2.pack(pady=2)
 
-print(f"Unique and differing rows have been saved to 'only_in_{file1}.xlsx', 'only_in_{file2}.xlsx', and 'differing_rows.xlsx'")
+# Button to run the diff checker
+confirmationLabel = tkinter.Label(root, text=f"Output saved to {OUTPUT_PATH}")
+errorLabel = tkinter.Label(root, text="Please select a file for each input")
+runButton = tkinter.Button(root, text="Run Diff Checker", width=20, height=2, command=lambda: check_Diff(file1_path, file2_path))
+runButton.pack(pady=20, padx=150)
+
+# Start the GUI event loop
+root.mainloop()
